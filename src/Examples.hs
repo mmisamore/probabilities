@@ -4,6 +4,7 @@ module Examples
 where
 
 import Data.List
+import Data.Maybe
 import Data.Function
 import Data.Ratio
 import Control.Applicative
@@ -15,14 +16,25 @@ newtype Probability = P { unProb :: Rational }
 -- Treat a rational as a probability
 prob :: Rational -> Probability
 prob p = if p >= 0 && p <= 1 then P p else P 0
-
+                             --
 -- Simple representation of a distribution
 newtype Dist a = Dist { unDist :: [(a,Probability)] }
-  deriving (Show)
 
 -- Get list of masses underlying distribution
 masses :: Dist a -> [(a,Probability)]
 masses = unDist
+
+-- Get just the list of values from a distribution
+values :: Dist a -> [a]
+values = map fst . masses
+
+-- Get just the list of probabilities from a distribution
+probs :: Dist a -> [Probability]
+probs = map snd . masses
+
+-- We can show distributions as long as we can normalize them
+instance (Eq a, Show a) => Show (Dist a) where
+  show (Dist ds) = show (normalize ds)
 
 -- Total putative probability represented by list of masses
 totalProb :: [(a,Probability)] -> Rational
@@ -37,7 +49,7 @@ isDist d = totalProb d == 1
 -- duplicates. We can have distributions whose elements are functions
 -- so this is relevant!
 normalize :: Eq a => [(a,Probability)] -> [(a,Probability)] 
-normalize aps = [(a,p a) | a <- distinctAs]
+normalize aps = [(a, p a) | a <- distinctAs]
   where distinctAs    = nub (map fst aps)
         numerator a   = totalProb . filter ((== a) . fst) $ aps 
         denominator   = totalProb aps
@@ -145,5 +157,82 @@ selectMany n as | n > 0 = do
     (bs,ss) <- selectMany (n-1) rs
     return (a:bs,ss)
 selectMany _ _ = certainly ([],[])
+
+
+-- The Monty Hall problem
+data Outcome = Win | Lose deriving (Show,Eq)
+
+-- Contestant's initial choice of door
+firstChoice :: Dist Outcome
+firstChoice = uniform [Win,Lose,Lose]
+
+-- Act of switching to the "other" door
+switch :: Outcome -> Dist Outcome
+switch Win  = certainly Lose
+switch Lose = certainly Win
+
+-- Solution:
+-- firstChoice vs. firstChoice >>= switch
+
+-- Cumulative distribution function for a distribution
+cdf :: Dist a -> [(a,Rational)]
+cdf d = [(a,unProb p) | (a,p) <- zip (values d) totalProbs]
+  where totalProbs = drop 1 (scanl (+) 0 (probs d))
+
+-- Sample by inverting the cumulative distribution
+sample :: Rational -> Dist a -> a
+sample r d = if r == 1 then last (values d)
+                       else head (drop (sampleLength d) (values d))
+  where sampleLength = length . takeWhile (r >=) . map snd . cdf  
+
+
+-- Monty Hall, with more detail
+data Door = A | B | C deriving Eq
+
+-- Doors contestant can choose from
+doors :: [Door]
+doors = [A,B,C]
+
+-- The game state
+data State = State { 
+  prize  :: Maybe Door, 
+  chosen :: Maybe Door,
+  opened :: Maybe Door 
+}
+
+-- Initial game state
+gameStart = State { prize = Nothing, chosen = Nothing, opened = Nothing } 
+
+-- Hiding the prize behind a door
+hidePrize :: State -> Dist State
+hidePrize s = uniform [s { prize = Just d } | d <- doors ]
+
+-- Contestant chooses a door
+chooseDoor :: State -> Dist State
+chooseDoor s = uniform [s { chosen = Just d } | d <- doors ]
+
+-- Host opens a door that is neither the chosen one nor the prize one
+openDoor :: State -> Dist State
+openDoor s = uniform [
+    s { opened = Just d } | d <- doors \\ catMaybes [chosen s, prize s]
+  ]
+
+-- Contestant strategy of switching to the unchosen, unopened door 
+switchDoor :: State -> Dist State
+switchDoor s = uniform [
+    s { chosen = Just d } | d <- doors \\ catMaybes [chosen s, opened s]
+  ]
+
+-- Contestant strategy of staying with the chosen door
+stay :: State -> Dist State
+stay = certainly 
+
+-- Some type synonyms
+type Strategy = State -> Dist State 
+type StateTransition = State -> Dist State 
+
+-- Starting with a strategy, we can describe the whole game
+game :: Strategy -> [StateTransition]
+game strat = [hidePrize,chooseDoor,openDoor,strat]
 
 
