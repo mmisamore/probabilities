@@ -183,11 +183,14 @@ switch Lose = certainly Win
 -- firstChoice vs. firstChoice >>= switch
 
 -- Cumulative distribution function for a distribution
+-- This is slow for lookup because we just use a list. We should use a Map
+-- instead for O(log n) lookup.
 cdf :: Dist a -> [(a,Rational)]
 cdf d = [(a,unProb p) | (a,p) <- zip (values d) totalProbs]
   where totalProbs = drop 1 (scanl (+) 0 (probs d))
 
 -- Sample by inverting the cumulative distribution
+-- Sampling. Slow for now.
 sample :: Rational -> Dist a -> a
 sample r d = if r == 1 then last (values d)
                        else head (drop (sampleLength d) (values d))
