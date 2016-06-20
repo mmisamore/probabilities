@@ -3,4 +3,11 @@ module Main where
 import Examples 
 
 main :: IO ()
-main = print "Hello, world" 
+
+main = do 
+  d <- unRDist (rSampleTrans 100 (8 .* oneYear) (Alive 0))
+  print d
+
+
+-- main = print $ (8 .* oneYear) (Alive 0)
+
