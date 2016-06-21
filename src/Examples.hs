@@ -1,5 +1,6 @@
 {-# language GeneralizedNewtypeDeriving #-} 
 {-# language StandaloneDeriving #-}
+{-# language BangPatterns #-}
 module Examples 
 where
 
@@ -53,6 +54,11 @@ isDist d = totalProb d == 1
 -- so this is relevant!
 normalize :: Ord a => [(a,Probability)] -> [(a,Probability)] 
 normalize = toList . M.fromListWith (+)
+
+-- Mathematically this is a no-op, but operationally it can enormously
+-- reduce the size of the representation, making sampling tractable
+norm :: Ord a => Dist a -> Dist a
+norm = Dist . normalize . masses
 
 -- Construct a uniform distribution from a finite list. Note that we
 -- have no notion of equality in general so there cannot be "duplicates"
@@ -286,12 +292,14 @@ rDist :: [Rand a] -> RDist a
 rDist = RDist . fmap uniform . sequenceA 
 
 -- Lift any pure distribution to a randomized distribution using n samples
-rSampleDist :: (Eq a) => Int -> Dist a -> RDist a
-rSampleDist n = rDist . map rSample . replicate n
+rSampleDist :: (Ord a) => Int -> Dist a -> RDist a
+rSampleDist n d = rDist (replicate n rSampleD)
+  where !d'      = norm d 
+        rSampleD = rSample d' 
 
 -- Lift any pure state transition to a randomized state 
 -- transition using n samples
-rSampleTrans :: (Eq a) => Int -> (a -> Dist a) -> (a -> RDist a)
+rSampleTrans :: (Ord a) => Int -> (a -> Dist a) -> (a -> RDist a)
 rSampleTrans n f = rSampleDist n . f 
 
 -- Helper for moving IO actions outside distribution
