@@ -5,8 +5,8 @@ import Examples
 main :: IO ()
 
 main = do 
-  d <- unRDist (rSampleTrans 1000 (8 .* oneYear) (Alive 0))
-  print d
+   d <- unRDist (rSampleTrans 1000 (9 .* oneYear) (Alive 0))
+   print d
 
--- main = print $ (8 .* oneYear) (Alive 0)
+-- main = print $ (9 .* oneYear) (Alive 0)
 

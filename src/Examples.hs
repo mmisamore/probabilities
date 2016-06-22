@@ -38,7 +38,7 @@ probs = map snd . masses
 
 -- We can show distributions as long as we can normalize them
 instance (Ord a, Show a) => Show (Dist a) where
-  show (Dist ds) = show (normalize ds)
+  show (Dist ds) = show (normalize ds) -- show ds 
 
 -- Total putative probability represented by list of masses
 totalProb :: [(a,Probability)] -> Rational
@@ -204,7 +204,7 @@ sample r d = if r == 1 then last (values d)
 
 
 -- Monty Hall, with more detail
-data Door = A | B | C deriving (Eq,Show)
+data Door = A | B | C deriving (Eq,Ord,Show)
 
 -- Doors contestant can choose from
 doors :: [Door]
@@ -215,7 +215,7 @@ data State = State {
   prize  :: Maybe Door, 
   chosen :: Maybe Door,
   opened :: Maybe Door 
-} deriving (Eq,Show)
+} deriving (Eq,Ord,Show)
 
 -- Initial game state
 gameStart = State { prize = Nothing, chosen = Nothing, opened = Nothing } 
@@ -249,8 +249,10 @@ type Strategy = State -> Dist State
 type StateTransition = State -> Dist State 
 
 -- We can sequence state transitions
-sequ :: (Monad m) => [a -> m a] -> a -> m a
-sequ sts = foldr (>=>) pure sts
+sequ :: (Ord a) => [a -> Dist a] -> a -> Dist a
+sequ sts = foldr op pure sts 
+  where op f g = norm . (f >=> g) 
+  -- where op f g = f >=> g
 
 -- Starting with a strategy, we can describe the whole game
 game :: Strategy -> Dist Outcome 
@@ -259,9 +261,9 @@ game strat = fmap winOrLose finalState
         winOrLose s = if chosen s == prize s then Win else Lose
 
 -- Sometimes we need to iterate state transitions several times for simulations
-(.*) :: (Monad m) => Int -> (a -> m a) -> a -> m a
-n .* ama | n < 0     = ama
-         | otherwise = sequ (replicate n ama)
+(.*) :: (Ord a) => Int -> (a -> Dist a) -> a -> Dist a
+n .* ada | n < 0     = ada 
+         | otherwise = sequ (replicate n ada)
 
 -- Sometimes we need true pseudorandom samples
 type Rand = IO
