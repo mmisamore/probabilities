@@ -4,6 +4,7 @@
 module Examples 
 where
 
+import Data.Coerce
 import Data.Map.Strict as M (fromListWith,toList)
 import Data.List
 import Data.Maybe
@@ -26,7 +27,7 @@ newtype Dist a = Dist { unDist :: [(a,Probability)] }
 
 -- Get list of masses underlying distribution
 masses :: Dist a -> [(a,Probability)]
-masses = unDist
+masses = coerce 
 
 -- Get just the list of values from a distribution
 values :: Dist a -> [a]
@@ -38,7 +39,7 @@ probs = map snd . masses
 
 -- We can show distributions as long as we can normalize them
 instance (Ord a, Show a) => Show (Dist a) where
-  show (Dist ds) = show (normalize ds) -- show ds 
+  show (Dist ds) = show (normalize ds) 
 
 -- Total putative probability represented by list of masses
 totalProb :: [(a,Probability)] -> Rational
@@ -49,22 +50,19 @@ isDist :: [(a,Probability)] -> Bool
 isDist d = totalProb d == 1
 
 -- Normalize a list of masses to total mass 1, removing duplicates.
--- Note the equality constraint on "a": this is needed to identify
--- duplicates. We can have distributions whose elements are functions
--- so this is relevant!
 normalize :: Ord a => [(a,Probability)] -> [(a,Probability)] 
 normalize = toList . M.fromListWith (+)
 
 -- Mathematically this is a no-op, but operationally it can enormously
 -- reduce the size of the representation, making sampling tractable
 norm :: Ord a => Dist a -> Dist a
-norm = Dist . normalize . masses
+norm = coerce . normalize . masses
 
 -- Construct a uniform distribution from a finite list. Note that we
 -- have no notion of equality in general so there cannot be "duplicates"
 uniform :: [a] -> Dist a
 uniform [] = fail "unsafe: uniform called on empty list"
-uniform as = Dist [(a,p) | a <- as]
+uniform as = coerce [(a,p) | a <- as]
   where p = P (1 % (toInteger (length as)))
 
 -- Given explicitly enumerated list of elements and probabilities, produce
@@ -73,7 +71,7 @@ enumDist :: [(a,Rational)] -> Dist a
 enumDist ars = if isDist (masses putative) 
                  then putative 
                  else fail "unsafe: enumDist called on non-distribution"
-  where putative = Dist [(a,prob r) | (a,r) <- ars]
+  where putative = coerce [(a,prob r) | (a,r) <- ars]
 
 -- An unweighted die is a uniform distribution
 die :: Dist Int
@@ -89,7 +87,7 @@ funcs = uniform [(+1),(+2),(+3)]
 
 -- Construct a distribution representing a certain occurrence
 certainly :: a -> Dist a
-certainly a = Dist [(a,1)]
+certainly a = coerce [(a, 1 :: Rational)] 
 
 -- An event is just a subset of the powerset of "a"
 type Event a = a -> Bool
@@ -106,13 +104,13 @@ type Event a = a -> Bool
 -- A distribution is a functor: we keep the probabilities the same but
 -- change the type of the points
 instance Functor Dist 
-  where fmap f (Dist aps) = Dist [(f a, p) | (a,p) <- aps]
+  where fmap f (Dist aps) = coerce [(f a, p) | (a,p) <- aps]
  
 -- Distributions are also applicative...
 instance Applicative Dist
   where pure = certainly
         Dist fps <*> Dist aqs = 
-          Dist [(f a, p*q) | (f,p) <- fps, (a,q) <- aqs]
+          coerce [(f a, p*q) | (f,p) <- fps, (a,q) <- aqs]
 
 -- ... so we can join them together with functions
 joinWith :: (a -> b -> c) -> Dist a -> Dist b -> Dist c
@@ -145,7 +143,7 @@ choose _ _ = 1
 
 -- Binomial distribution
 binomial :: Int -> Probability -> Dist Int
-binomial n (P p) = Dist [(k, P (nChoose k * p^k * (1 - p)^(n-k))) | k <- [0..n]]
+binomial n (P p) = coerce [(k, P (nChoose k * p^k * (1 - p)^(n-k))) | k <- [0..n]]
   where nChoose k = toRational (n `choose` k)
 
 -- Choose an element from a list, removing it 
@@ -161,7 +159,7 @@ selectOne as = uniform [(a, delete a as) | a <- as]
 instance Monad Dist where
     return = certainly
     -- (>>=) :: Dist a -> (a -> Dist b) -> Dist b
-    Dist aps >>= f = Dist [(b,p*q) | (a,p) <- aps, (b,q) <- masses (f a)]
+    Dist aps >>= f = coerce [(b,p*q) | (a,p) <- aps, (b,q) <- masses (f a)]
 
 -- ... and now we can select more than once without replacement:
 selectMany :: (Eq a) => Int -> [a] -> Dist ([a],[a])
@@ -248,11 +246,25 @@ stay = certainly
 type Strategy = State -> Dist State 
 type StateTransition = State -> Dist State 
 
--- We can sequence state transitions
-sequ :: (Ord a) => [a -> Dist a] -> a -> Dist a
-sequ sts = foldr op pure sts 
-  where op f g = norm . (f >=> g) 
-  -- where op f g = f >=> g
+-- Class of distributions supporting simulation 
+class Sim f where
+  sequ :: (Ord a) => [a -> f a] -> a -> f a
+
+-- Pure distributions can be simulated as long as the point type is
+-- totally ordered
+instance Sim Dist where
+  sequ = let op f g = norm . (f >=> g) 
+         in foldr op pure 
+
+-- Randomized distributions can also be simulated
+instance Sim RDist where
+  sequ = let op f g = RDist . fmap norm . unRDist . (f >=> g)
+         in foldr op pure
+
+-- Run any simulation for a fixed number of transitions
+(.*) :: (Sim f, Ord a) => Int -> (a -> f a) -> a -> f a
+n .* afa | n < 0     = afa 
+         | otherwise = sequ (replicate n afa)
 
 -- Starting with a strategy, we can describe the whole game
 game :: Strategy -> Dist Outcome 
@@ -260,24 +272,19 @@ game strat = fmap winOrLose finalState
   where finalState  = sequ [hidePrize,chooseDoor,openDoor,strat] gameStart
         winOrLose s = if chosen s == prize s then Win else Lose
 
--- Sometimes we need to iterate state transitions several times for simulations
-(.*) :: (Ord a) => Int -> (a -> Dist a) -> a -> Dist a
-n .* ada | n < 0     = ada 
-         | otherwise = sequ (replicate n ada)
-
 -- Sometimes we need true pseudorandom samples
-type Rand = IO
+newtype Rand a = Rand { unRand :: IO a } deriving (Functor,Applicative,Monad)
 
 -- Random rationals between 0 and 1
 randomProb :: Rand Rational 
-randomProb = do
-    denom <- randomIO 
+randomProb = coerce $ do
+    denom <- randomIO :: IO Integer 
     if denom <= 0 
-      then randomProb
+      then coerce randomProb
       else do
         num <- randomIO
         if num < 0 || num > denom
-          then randomProb
+          then coerce randomProb
           else return (num % denom)
 
 -- Random sampling from any pure distribution
@@ -296,7 +303,7 @@ rDist = RDist . fmap uniform . sequenceA
 -- Lift any pure distribution to a randomized distribution using n samples
 rSampleDist :: (Ord a) => Int -> Dist a -> RDist a
 rSampleDist n d = rDist (replicate n rSampleD)
-  where !d'      = norm d 
+  where d'       = norm d 
         rSampleD = rSample d' 
 
 -- Lift any pure state transition to a randomized state 
@@ -306,20 +313,17 @@ rSampleTrans n f = rSampleDist n . f
 
 -- Helper for moving IO actions outside distribution
 seqDist :: Dist (Rand a) -> Rand (Dist a)
-seqDist (Dist fas) = 
-  fmap Dist (sequenceA [fmap (\a -> (a,p)) fa | (fa,p) <- fas])
-
--- Helper for moving IO actions outside randomized distributions
-seqRDist :: RDist (Rand a) -> Rand (RDist a)
-seqRDist (RDist rdras) = fmap (RDist . seqDist) rdras
+seqDist (Dist fas) = coerce (sequenceA [fmap (\a -> (a,p)) fa | (fa,p) <- fas])
 
 -- Randomized distributions are also functors
 instance Functor RDist where
-  fmap f (RDist rda) = RDist (fmap (fmap f) rda)
+  fmap f (RDist rda) = coerce (fmap (fmap f) rda)
 
 -- Flatten randomized distributions 
 joinR :: RDist (RDist a) -> RDist a
-joinR = RDist . fmap join . join . fmap unRDist . seqRDist . fmap unRDist 
+joinR = let coerce1 = coerce :: RDist (RDist a)       -> RDist (Rand (Dist a)) 
+            coerce2 = coerce :: RDist (Rand (Dist a)) -> Rand (Dist (Rand (Dist a)))
+         in coerce . fmap join . join . fmap seqDist . coerce2 . coerce1
 
 -- Randomized distributions are applicatives since they are monads
 instance Applicative RDist where
