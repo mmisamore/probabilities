@@ -321,9 +321,8 @@ instance Functor RDist where
 
 -- Flatten randomized distributions 
 joinR :: RDist (RDist a) -> RDist a
-joinR = let coerce1 = coerce :: RDist (RDist a)       -> RDist (Rand (Dist a)) 
-            coerce2 = coerce :: RDist (Rand (Dist a)) -> Rand (Dist (Rand (Dist a)))
-         in coerce . fmap join . join . fmap seqDist . coerce2 . coerce1
+joinR = let coerce1 = coerce :: RDist (RDist a) -> Rand (Dist (Rand (Dist a))) 
+        in  coerce . fmap join . join . fmap seqDist . coerce1
 
 -- Randomized distributions are applicatives since they are monads
 instance Applicative RDist where
