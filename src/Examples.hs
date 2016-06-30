@@ -1,10 +1,8 @@
 {-# language GeneralizedNewtypeDeriving #-} 
-{-# language StandaloneDeriving #-}
 {-# language BangPatterns #-}
 module Examples 
 where
 
-import Data.Coerce
 import Data.Map.Strict as M (fromListWith,toList)
 import Data.List
 import Data.Maybe
@@ -13,6 +11,7 @@ import Data.Ratio
 import Control.Applicative
 import Control.Monad
 import System.Random 
+import Data.Coerce
 
 -- So we don't have to worry about testing equalities of floats
 newtype Probability = P { unProb :: Rational }
@@ -56,7 +55,7 @@ normalize = toList . M.fromListWith (+)
 -- Mathematically this is a no-op, but operationally it can enormously
 -- reduce the size of the representation, making sampling tractable
 norm :: Ord a => Dist a -> Dist a
-norm = coerce . normalize . masses
+norm = coerce . normalize . masses 
 
 -- Construct a uniform distribution from a finite list. Note that we
 -- have no notion of equality in general so there cannot be "duplicates"
@@ -69,8 +68,8 @@ uniform as = coerce [(a,p) | a <- as]
 -- a distribution. Like "uniform", this function isn't total.
 enumDist :: [(a,Rational)] -> Dist a
 enumDist ars = if isDist (masses putative) 
-                 then putative 
-                 else fail "unsafe: enumDist called on non-distribution"
+               then putative 
+               else fail "unsafe: enumDist called on non-distribution"
   where putative = coerce [(a,prob r) | (a,r) <- ars]
 
 -- An unweighted die is a uniform distribution
@@ -259,7 +258,7 @@ instance Sim Dist where
 -- Randomized distributions can also be simulated
 instance Sim RDist where
   sequ = let op f g = RDist . fmap norm . unRDist . (f >=> g)
-         in foldr op pure
+         in foldl' op pure 
 
 -- Run any simulation for a fixed number of transitions
 (.*) :: (Sim f, Ord a) => Int -> (a -> f a) -> a -> f a
@@ -290,11 +289,15 @@ randomProb = coerce $ do
 -- Random sampling from any pure distribution
 rSample :: Dist a -> Rand a
 rSample d = do
-    r <- randomProb
-    return (sample r d)
+  r <- randomProb
+  return (sample r d)
 
 -- A type for randomized (non-pure) distributions
 newtype RDist a = RDist { unRDist :: Rand (Dist a) }
+
+-- Treat any randomized distribution as an ordinary distribution plus some I/O
+runRDist :: RDist a -> IO (Dist a)
+runRDist = coerce
 
 -- We can build a randomized distribution from any list of random samples
 rDist :: [Rand a] -> RDist a
@@ -302,14 +305,12 @@ rDist = RDist . fmap uniform . sequenceA
 
 -- Lift any pure distribution to a randomized distribution using n samples
 rSampleDist :: (Ord a) => Int -> Dist a -> RDist a
-rSampleDist n d = rDist (replicate n rSampleD)
-  where d'       = norm d 
-        rSampleD = rSample d' 
+rSampleDist n d = rDist (replicate n (rSample d))
 
 -- Lift any pure state transition to a randomized state 
 -- transition using n samples
 rSampleTrans :: (Ord a) => Int -> (a -> Dist a) -> (a -> RDist a)
-rSampleTrans n f = rSampleDist n . f 
+rSampleTrans n f = rSampleDist n . f
 
 -- Helper for moving IO actions outside distribution
 seqDist :: Dist (Rand a) -> Rand (Dist a)
@@ -322,7 +323,7 @@ instance Functor RDist where
 -- Flatten randomized distributions 
 joinR :: RDist (RDist a) -> RDist a
 joinR = let coerce1 = coerce :: RDist (RDist a) -> Rand (Dist (Rand (Dist a))) 
-        in  coerce . fmap join . join . fmap seqDist . coerce1
+        in  coerce . fmap join . join . fmap seqDist . coerce1 
 
 -- Randomized distributions are applicatives since they are monads
 instance Applicative RDist where
@@ -354,7 +355,7 @@ e ? rda = do
 type Height = Int
 
 -- Trees are either alive, hit by lightning (standing), or fallen
-data Tree = Alive Height | Hit Height | Fallen deriving (Eq,Ord,Show)
+data Tree = Alive !Height | Hit !Height | Fallen deriving (Eq,Ord,Show)
 
 -- Simulate a year's growth for any Tree that is Alive
 grow :: Tree -> Dist Tree
