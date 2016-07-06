@@ -12,6 +12,7 @@ import Control.Applicative
 import Control.Monad
 import System.Random 
 import Data.Coerce
+import Test.QuickCheck hiding (sample,choose)
 
 -- So we don't have to worry about testing equalities of floats
 newtype Probability = P { unProb :: Rational }
@@ -50,7 +51,11 @@ isDist d = totalProb d == 1
 
 -- Normalize a list of masses to total mass 1, removing duplicates.
 normalize :: Ord a => [(a,Probability)] -> [(a,Probability)] 
-normalize = toList . M.fromListWith (+)
+normalize aps = if total /= 0 then normed else masses (uniform (map fst noDupes))
+  where noDupes = (toList . M.fromListWith (+)) aps
+        total   = totalProb noDupes
+        f (P r) = P (r / total) 
+        normed  = map (fmap f) noDupes 
 
 -- Mathematically this is a no-op, but operationally it can enormously
 -- reduce the size of the representation, making sampling tractable
