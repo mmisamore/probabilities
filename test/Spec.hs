@@ -56,8 +56,69 @@ valuesOfUniformId ns = if ns /= []
 uniformIsDist :: [Numeric] -> Bool
 uniformIsDist ns = isDist (masses (uniform ns))
 
--- enumDistIsDist :: Dist Numeric -> Bool
--- enumDistIsDist da = isDist (masses (enumDist (masses da :: [(Numeric,Rational)])))
+-- Enumerating masses of a distribution gives back the distribution
+enumDistMassesId :: Dist Numeric -> Bool
+enumDistMassesId da = enumDist (masses da) == da
+
+-- A die is a distribution
+dieIsDist :: Bool
+dieIsDist = isDist (masses die) 
+
+-- A coin is a distribution
+coinIsDist :: Bool
+coinIsDist = isDist (masses coin)
+
+-- Certainly anything should be a distribution
+certainlyIsDist :: Numeric -> Bool
+certainlyIsDist n = isDist (masses (certainly n))
+
+-- Total probability over all events is always 1 
+sumPdfIsOne :: Dist Numeric -> Bool
+sumPdfIsOne da = (const True) ?? da == 1  
+
+-- Total probability for impossible event is 0
+sumImpossibleIsZero :: Dist Numeric -> Bool
+sumImpossibleIsZero da = (const False) ?? da == 0 
+
+-- Distributions are functors: they respect function composition 
+distRespectsDot :: Dist Numeric -> Gen Bool
+distRespectsDot da = do
+  n <- arbitrary
+  m <- arbitrary
+  return $ (fmap (+n) . fmap (*m)) da == fmap ((+n) . (*m)) da
+
+-- Distributions are functors: they respect identity
+distRespectsId :: Dist Numeric -> Bool
+distRespectsId da = (fmap id da == da)
+
+-- Distributions are also monoidal for the applicative structure
+distMonoidalProd :: Dist Numeric -> Dist Numeric -> Dist Numeric -> Bool
+distMonoidalProd da db dc = 
+  fmap right ((da <&> db) <&> dc) == da <&> (db <&> dc) 
+  where right ((a,b),c) = (a,(b,c))
+
+-- Distributions respect the left monoidal unit, which is "pure"
+distLeftMonoidalUnit :: Numeric -> Dist Numeric -> Bool
+distLeftMonoidalUnit a db = (pure a <&> db) == fmap (\b -> (a,b)) db
+
+-- Distributions respect the right monoidal unit, which is also "pure"
+distRightMonoidalUnit :: Numeric -> Dist Numeric -> Bool
+distRightMonoidalUnit a db = (db <&> pure a) == fmap (\b -> (b,a)) db 
+
+-- n dice is a distribution
+diceIsDist :: Int -> Bool
+diceIsDist n = isDist (masses (dice n))
+
+-- Binomial distributions are distributions
+binomialIsDist :: Int -> Probability -> Bool
+binomialIsDist n p = isDist (masses (binomial n p))
+
+-- Selecting one and concatenating back onto rest always gives back
+-- original list
+
+-- selectOneConcat :: [Numeric] -> Bool
+-- selectOneConcat ns = selectOne ns 
+
 
 -- TODO: Random "randomized" distributions
 
@@ -71,5 +132,17 @@ main = do
   quickCheck simplifyIdempotent 
   quickCheck valuesOfUniformId 
   quickCheck uniformIsDist 
-  -- quickCheck enumDistIsDist 
+  quickCheck enumDistMassesId
+  quickCheck dieIsDist
+  quickCheck coinIsDist 
+  quickCheck certainlyIsDist 
+  quickCheck sumPdfIsOne 
+  quickCheck sumImpossibleIsZero 
+  quickCheck distRespectsDot 
+  quickCheck distRespectsId 
+  quickCheckWith (stdArgs {maxSuccess = 10}) distMonoidalProd 
+  quickCheck distLeftMonoidalUnit
+  quickCheck distRightMonoidalUnit 
+  quickCheckWith (stdArgs {maxSize = 5}) diceIsDist 
+  quickCheckWith (stdArgs {maxSize = 10}) binomialIsDist 
 
