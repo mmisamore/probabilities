@@ -87,9 +87,8 @@ uniform as = Dist [(a,p) | a <- as]
 
 -- Given explicitly enumerated list of elements and probabilities, produce
 -- a distribution
-enumDist :: Monoid a => [(a,Rational)] -> Dist a
-enumDist ars = if isDist putative then Dist putative else mempty
-  where putative = [(a,prob r) | (a,r) <- ars]
+enumDist :: Monoid a => [(a,Probability)] -> Dist a
+enumDist ars = if isDist ars then Dist ars else mempty
 
 -- An unweighted die is a uniform distribution
 die :: Dist Numeric 
@@ -107,7 +106,7 @@ funcs = uniform [Endo (+1), Endo (+2), Endo (+3)]
 certainly :: a -> Dist a
 certainly a = Dist [(a, 1 :: Probability)] 
 
--- An event is just a subset of the powerset of "a"
+-- An event is just a subset of the powerset of elementary events "a"
 type Event a = a -> Bool
 
 -- Given an Event and a Dist, determine the probability mass of the Event
@@ -134,6 +133,10 @@ instance Applicative Dist
 joinWith :: (a -> b -> c) -> Dist a -> Dist b -> Dist c
 joinWith = liftA2
 
+-- In particular, we have the usual monoidal product
+(<&>) :: Applicative f => f a -> f b -> f (a,b)
+(<&>) = liftA2 (,)
+
 -- ... and they are automatically Numeric if the point types are Numeric
 instance Num a => Num (Dist a)
   where (+) = liftA2 (+)
@@ -146,7 +149,6 @@ instance Num a => Num (Dist a)
 
 -- Distribution for n dice rolls 
 dice :: Int -> Dist [Numeric]
-dice 0 = certainly []
 dice n | n > 0 = (:) <$> die <*> dice (n-1)
 dice _ = certainly []
 
@@ -161,6 +163,7 @@ choose _ _ = 1
 
 -- Binomial distribution
 binomial :: Int -> Probability -> Dist Numeric 
+binomial n p | n <= 0 = certainly mempty
 binomial n p = Dist [(f (toInteger k), nChoose k * p^k * (1 - p)^(n-k)) | k <- [0..n]]
   where nChoose k = P (f (n `choose` k))
         f         = toNumeric . fromIntegral 
@@ -415,7 +418,12 @@ unfoldTrans df t = join (df <*> certainly t)
 -- Define a simulation where growth probability is 90%, hit probability is
 -- 4%, and fall probability is 6%
 oneYear :: Tree -> Dist Tree
-oneYear = unfoldTrans (enumDist [(grow, 9 % 10),(hit, 4 % 100),(fall, 6 % 100)])
+oneYear = unfoldTrans manualDist where
+  manualDist = enumDist [
+      (grow, prob (9 % 10)),
+      (hit,  prob (4 % 100)),
+      (fall, prob (6 % 100))
+    ]
 
 -- Example: oneYear (Alive 0)
 --          (5 .* oneYear) (Alive 0)
