@@ -40,6 +40,10 @@ prob p = if p >= 0 && p <= 1 then P (toNumeric p) else P (toNumeric 0)
 -- Simple representation of a distribution
 newtype Dist a = Dist { unDist :: [(a,Probability)] }
 
+-- Distributions are comparable for equality when their elements are
+instance Eq a => Eq (Dist a) where
+  (==) = (==) `on` masses
+
 -- Distributions over monoids are also monoids
 instance Monoid a => Monoid (Dist a) where
   mappend = liftA2 (<>) 
@@ -82,7 +86,7 @@ uniform as = Dist [(a,p) | a <- as]
   where p = P (toNumeric (1 % (toInteger (length as))))
 
 -- Given explicitly enumerated list of elements and probabilities, produce
--- a distribution. Like "uniform", this function isn't total.
+-- a distribution
 enumDist :: Monoid a => [(a,Rational)] -> Dist a
 enumDist ars = if isDist putative then Dist putative else mempty
   where putative = [(a,prob r) | (a,r) <- ars]
@@ -183,7 +187,7 @@ selectMany _ [] = certainly ([],[])
 selectMany n as@(a:_) | n > 0 = do
     (a,rs)  <- selectOne as
     (bs,ss) <- selectMany (n-1) rs
-    return $! (a:bs,ss)
+    return (a:bs,ss)
 selectMany _ _ = certainly ([],[])
 
 
@@ -307,13 +311,13 @@ randomProb = do
         num <- Rand randomIO 
         if num < 0 || num > denom
           then randomProb
-          else return $! (P . toNumeric) (num % denom)
+          else return $ (P . toNumeric) (num % denom)
 
 -- Random sampling from any pure distribution
 rSample :: Monoid a => Dist a -> Rand a
 rSample d = do
   r <- randomProb
-  return $! sample d r
+  return (sample d r)
 
 -- A type for randomized (non-pure) distributions
 newtype RDist a = RDist { unRDist :: Rand (Dist a) }
@@ -324,7 +328,7 @@ runRDist = unRand . unRDist
 
 -- We can build a randomized distribution from any list of random samples
 rDist :: Monoid a => [Rand a] -> RDist a
-rDist []  = RDist (return $! mempty) 
+rDist []  = RDist (return mempty) 
 rDist ras = RDist (fmap uniform (sequenceA ras))
 
 -- Lift any pure distribution to a randomized distribution using n samples
@@ -373,7 +377,7 @@ instance Monad RDist where
 (?) :: Event a -> RDist a -> Rand Probability
 e ? rda = do
   da <- unRDist rda
-  return $! e ?? da
+  return (e ?? da)
 
 -- We can approximate event probabilities via random sampling. Examples: 
 -- (==0)     ? (rSampleDist 1000 coin)
