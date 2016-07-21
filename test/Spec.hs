@@ -1,6 +1,8 @@
 import Test.QuickCheck
 import Examples
 import Data.Ratio
+import Data.List 
+import Control.Monad
 
 -- Random numerics in [0,1]
 instance Arbitrary Numeric where
@@ -113,11 +115,24 @@ diceIsDist n = isDist (masses (dice n))
 binomialIsDist :: Int -> Probability -> Bool
 binomialIsDist n p = isDist (masses (binomial n p))
 
--- Selecting one and concatenating back onto rest always gives back
--- original list
+-- Selecting one and recombining always gives back the original list 
+selectOneConcat :: [Numeric] -> Bool
+selectOneConcat [] = True 
+selectOneConcat ns = all (== ns') (values recombined) where 
+  recombined = fmap (sort . uncurry (:)) (selectOne ns) :: Dist [Numeric] 
+  ns'        = sort ns
 
--- selectOneConcat :: [Numeric] -> Bool
--- selectOneConcat ns = selectOne ns 
+-- Distributions are monads: they are associative
+distIsMonadAssoc :: [Numeric] -> Bool
+distIsMonadAssoc ns = ((f >=> g) >=> h) ns == (f >=> (g >=> h)) ns
+  where f = selectOne  
+        g = selectOne . snd
+        h = g
+
+-- Distributions are monads: they are left unital
+distIsMonadLeftUnit :: [Numeric] -> Bool
+distIsMonadLeftUnit ns = (return ns >>= selectOne) == (selectOne ns)
+
 
 
 -- TODO: Random "randomized" distributions
@@ -145,4 +160,7 @@ main = do
   quickCheck distRightMonoidalUnit 
   quickCheckWith (stdArgs {maxSize = 5}) diceIsDist 
   quickCheckWith (stdArgs {maxSize = 10}) binomialIsDist 
+  quickCheck selectOneConcat 
+  quickCheckWith (stdArgs {maxSize = 10}) distIsMonadAssoc 
+  quickCheck distIsMonadLeftUnit 
 
