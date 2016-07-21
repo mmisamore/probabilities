@@ -170,8 +170,8 @@ binomial n p = Dist [(f (toInteger k), nChoose k * p^k * (1 - p)^(n-k)) | k <- [
 
 -- Choose an element from a list, removing it 
 selectOne :: (Eq a, Monoid a) => [a] -> Dist (a,[a])
-selectOne []     = certainly (mempty,[]) 
-selectOne (a:as) = uniform [(a, delete a as) | a <- as] 
+selectOne [] = certainly (mempty,[]) 
+selectOne as = uniform [(a, delete a as) | a <- as] 
 
 -- Example: selectOne [1,2,3]
 -- Note that there is nothing random about these functions: they are
