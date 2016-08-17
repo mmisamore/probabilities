@@ -1,14 +1,14 @@
-import Test.QuickCheck
+import Test.QuickCheck hiding (sample)
 import Examples
 import Data.Ratio
-import Data.List 
+import Data.List
 import Control.Monad
 
 -- Random numerics in [0,1]
 instance Arbitrary Numeric where
   arbitrary = do
     n <- arbitrary `suchThat` (>= 0)
-    d <- arbitrary `suchThat` (\d -> d >= n && d > 0) 
+    d <- arbitrary `suchThat` (\d -> d >= n && d > 0)
     return (toNumeric (n % d))
 
 -- Random probabilties
@@ -28,17 +28,17 @@ instance (Monoid a, Ord a, Arbitrary a) => Arbitrary (Dist a) where
 probabilityInUnitInterval :: Probability -> Bool
 probabilityInUnitInterval p = (p >= prob 0) && (p <= prob 1)
 
--- Distributions have total mass 1 
+-- Distributions have total mass 1
 probabilityTotalMassOne :: Dist Numeric -> Bool
 probabilityTotalMassOne da = totalProb (masses da) == 1
 
 -- Sum of probabilities has mass 1
-probabilityProbsMassOne :: Dist Numeric -> Bool 
+probabilityProbsMassOne :: Dist Numeric -> Bool
 probabilityProbsMassOne da = sum (probs da) == 1
 
 -- Distributions are distributions
 distIsDist :: Dist Numeric -> Bool
-distIsDist da = isDist (masses da) 
+distIsDist da = isDist (masses da)
 
 -- Simplifying a distribution gives another distribution
 simplifyIsDist :: Dist Numeric -> Bool
@@ -50,8 +50,8 @@ simplifyIdempotent da = simplify (simplify da) == simplify da
 
 -- Values of any uniform distribution gives back values we started with
 valuesOfUniformId :: [Numeric] -> Bool
-valuesOfUniformId ns = if ns /= [] 
-                       then values (uniform ns) == ns 
+valuesOfUniformId ns = if ns /= []
+                       then values (uniform ns) == ns
                        else values (uniform ns) == [mempty]
 
 -- Uniform distributions are distributions
@@ -64,7 +64,7 @@ enumDistMassesId da = enumDist (masses da) == da
 
 -- A die is a distribution
 dieIsDist :: Bool
-dieIsDist = isDist (masses die) 
+dieIsDist = isDist (masses die)
 
 -- A coin is a distribution
 coinIsDist :: Bool
@@ -74,15 +74,15 @@ coinIsDist = isDist (masses coin)
 certainlyIsDist :: Numeric -> Bool
 certainlyIsDist n = isDist (masses (certainly n))
 
--- Total probability over all events is always 1 
+-- Total probability over all events is always 1
 sumPdfIsOne :: Dist Numeric -> Bool
-sumPdfIsOne da = (const True) ?? da == 1  
+sumPdfIsOne da = const True ?? da == 1
 
 -- Total probability for impossible event is 0
 sumImpossibleIsZero :: Dist Numeric -> Bool
-sumImpossibleIsZero da = (const False) ?? da == 0 
+sumImpossibleIsZero da = const False ?? da == 0
 
--- Distributions are functors: they respect function composition 
+-- Distributions are functors: they respect function composition
 distRespectsDot :: Dist Numeric -> Gen Bool
 distRespectsDot da = do
   n <- arbitrary
@@ -91,12 +91,12 @@ distRespectsDot da = do
 
 -- Distributions are functors: they respect identity
 distRespectsId :: Dist Numeric -> Bool
-distRespectsId da = (fmap id da == da)
+distRespectsId da = fmap id da == da
 
 -- Distributions are also monoidal for the applicative structure
 distMonoidalProd :: Dist Numeric -> Dist Numeric -> Dist Numeric -> Bool
-distMonoidalProd da db dc = 
-  fmap right ((da <&> db) <&> dc) == da <&> (db <&> dc) 
+distMonoidalProd da db dc =
+  fmap right ((da <&> db) <&> dc) == da <&> (db <&> dc)
   where right ((a,b),c) = (a,(b,c))
 
 -- Distributions respect the left monoidal unit, which is "pure"
@@ -105,7 +105,7 @@ distLeftMonoidalUnit a db = (pure a <&> db) == fmap (\b -> (a,b)) db
 
 -- Distributions respect the right monoidal unit, which is also "pure"
 distRightMonoidalUnit :: Numeric -> Dist Numeric -> Bool
-distRightMonoidalUnit a db = (db <&> pure a) == fmap (\b -> (b,a)) db 
+distRightMonoidalUnit a db = (db <&> pure a) == fmap (\b -> (b,a)) db
 
 -- n dice is a distribution
 diceIsDist :: Int -> Bool
@@ -115,52 +115,85 @@ diceIsDist n = isDist (masses (dice n))
 binomialIsDist :: Int -> Probability -> Bool
 binomialIsDist n p = isDist (masses (binomial n p))
 
--- Selecting one and recombining always gives back the original list 
+-- Selecting one and recombining always gives back the original list
 selectOneConcat :: [Numeric] -> Bool
-selectOneConcat [] = True 
-selectOneConcat ns = all (== ns') (values recombined) where 
-  recombined = fmap (sort . uncurry (:)) (selectOne ns) :: Dist [Numeric] 
+selectOneConcat [] = True
+selectOneConcat ns = all (== ns') (values recombined) where
+  recombined = fmap (sort . uncurry (:)) (selectOne ns) :: Dist [Numeric]
   ns'        = sort ns
 
 -- Distributions are monads: they are associative
 distIsMonadAssoc :: [Numeric] -> Bool
 distIsMonadAssoc ns = ((f >=> g) >=> h) ns == (f >=> (g >=> h)) ns
-  where f = selectOne  
-        g = selectOne . snd
+  where f ns = if length ns > 2 then selectOne ns else return (mempty,take 2 ns)
+        g = f . snd
         h = g
 
 -- Distributions are monads: they are left unital
 distIsMonadLeftUnit :: [Numeric] -> Bool
-distIsMonadLeftUnit ns = (return ns >>= selectOne) == (selectOne ns)
+distIsMonadLeftUnit ns = (return ns >>= f) == f ns
+  where f ns = if length ns > 2 then selectOne ns else return (mempty,take 2 ns)
 
+-- Distributions are monads: they are right unital
+distIsMonadRightUnit :: Dist Numeric -> Bool
+distIsMonadRightUnit da = (da >>= return) == da
 
+-- Selecting many and recombining always gives back the original list
+selectManyConcat :: Int -> [Numeric] -> Bool
+selectManyConcat k ns = all (== ns') (values (recombined k)) where
+  recombined k = fmap (sort . uncurry (++)) (selectMany k ns) :: Dist [Numeric]
+  ns'          = sort ns
 
--- TODO: Random "randomized" distributions
+-- Values of a cdf are just the values of the distribution
+cdfValuesMatchDist :: Dist Numeric -> Bool
+cdfValuesMatchDist da = map fst (cdf da) == values da
+
+-- Rightmost value of a cdf is 1
+cdfLastNumIsOne :: Dist Numeric -> Bool
+cdfLastNumIsOne da =
+    case reverse (map snd (cdf da)) of
+      []    -> True
+      (n:_) -> n == 1
+
+-- Sampling from a dist with one possible outcome gives back that outcome
+sampleCertainly :: Probability -> Bool
+sampleCertainly p = sample (certainly (1 :: Numeric)) p == 1
+
+-- Random "randomized" distributions
+instance (Arbitrary a, Monoid a, Ord a) => Arbitrary (RDist a) where
+   arbitrary = do
+     d <- arbitrary
+     return (pureDist d)
 
 main :: IO ()
 main = do
-  quickCheck probabilityInUnitInterval 
-  quickCheck probabilityTotalMassOne 
-  quickCheck probabilityProbsMassOne 
-  quickCheck distIsDist 
-  quickCheck simplifyIsDist 
-  quickCheck simplifyIdempotent 
-  quickCheck valuesOfUniformId 
-  quickCheck uniformIsDist 
+  quickCheck probabilityInUnitInterval
+  quickCheck probabilityTotalMassOne
+  quickCheck probabilityProbsMassOne
+  quickCheck distIsDist
+  quickCheck simplifyIsDist
+  quickCheck simplifyIdempotent
+  quickCheck valuesOfUniformId
+  quickCheck uniformIsDist
   quickCheck enumDistMassesId
   quickCheck dieIsDist
-  quickCheck coinIsDist 
-  quickCheck certainlyIsDist 
-  quickCheck sumPdfIsOne 
-  quickCheck sumImpossibleIsZero 
-  quickCheck distRespectsDot 
-  quickCheck distRespectsId 
-  quickCheckWith (stdArgs {maxSuccess = 10}) distMonoidalProd 
+  quickCheck coinIsDist
+  quickCheck certainlyIsDist
+  quickCheck sumPdfIsOne
+  quickCheck sumImpossibleIsZero
+  quickCheck distRespectsDot
+  quickCheck distRespectsId
+  quickCheckWith (stdArgs {maxSuccess = 10}) distMonoidalProd
   quickCheck distLeftMonoidalUnit
-  quickCheck distRightMonoidalUnit 
-  quickCheckWith (stdArgs {maxSize = 5}) diceIsDist 
-  quickCheckWith (stdArgs {maxSize = 10}) binomialIsDist 
-  quickCheck selectOneConcat 
-  quickCheckWith (stdArgs {maxSize = 10}) distIsMonadAssoc 
-  quickCheck distIsMonadLeftUnit 
+  quickCheck distRightMonoidalUnit
+  quickCheckWith (stdArgs {maxSize = 5}) diceIsDist
+  quickCheckWith (stdArgs {maxSize = 10}) binomialIsDist
+  quickCheck selectOneConcat
+  quickCheckWith (stdArgs {maxSize = 10}) distIsMonadAssoc
+  quickCheck distIsMonadLeftUnit
+  quickCheck distIsMonadRightUnit
+  quickCheckWith (stdArgs {maxSize = 10}) selectManyConcat
+  quickCheck cdfValuesMatchDist
+  quickCheck cdfLastNumIsOne
+  quickCheck sampleCertainly
 
