@@ -80,8 +80,9 @@ simplify = Dist . toList . M.fromListWith (+) . masses
 -- Construct a uniform distribution from a finite list. We have no
 -- notion of equality so there cannot be "duplicates" in the result
 uniform :: Monoid a => [a] -> Dist a
-uniform [] = mempty
-uniform as = Dist [(a,p) | a <- as]
+uniform as = if null as
+                then mempty
+                else Dist [(a,p) | a <- as]
   where p = P (toNumeric (1 % toInteger (length as)))
 
 -- Given explicitly enumerated list of elements and probabilities, produce
@@ -97,7 +98,7 @@ die = uniform [1,2,3,4,5,6]
 coin :: Dist Numeric
 coin = uniform [0,1]
 
--- An unbiased set of numeric functions
+-- An unbiased set of numeric functions, showing we don't require Eq constraint
 funcs :: Dist (Endo Int)
 funcs = uniform [Endo (+1), Endo (+2), Endo (+3)]
 
@@ -125,8 +126,7 @@ instance Functor Dist
 -- Distributions are also applicative...
 instance Applicative Dist
   where pure = certainly
-        Dist fps <*> Dist aqs =
-          Dist [(f a, p*q) | (f,p) <- fps, (a,q) <- aqs]
+        Dist fps <*> Dist aqs = Dist [(f a, p*q) | (f,p) <- fps, (a,q) <- aqs]
 
 -- ... so we can join them together with functions
 joinWith :: (a -> b -> c) -> Dist a -> Dist b -> Dist c
@@ -148,29 +148,32 @@ instance Num a => Num (Dist a)
 
 -- Distribution for n dice rolls
 dice :: Int -> Dist [Numeric]
-dice n | n > 0 = (:) <$> die <*> dice (n-1)
-dice _ = certainly []
+dice n = if n > 0
+            then (:) <$> die <*> dice (n-1)
+            else certainly []
 
 -- Snake eyes: (==[1,1]) ?? dice 2
 
 -- Number of ways of choosing k elements from a set of n distinct elements
 choose :: Int -> Int -> Integer
-choose n 0 = 1
-choose n k | k == n = 1
-choose n k | 0 < k && k < n = choose (n-1) (k-1) + choose (n-1) k
-choose _ _ = 1
+choose n k =
+  if k == 0 || k == n then 1
+  else
+    if k > 0 && k < n then choose (n-1) (k-1) + choose (n-1) k
+    else 1
 
 -- Binomial distribution
 binomial :: Int -> Probability -> Dist Numeric
-binomial n p | n <= 0 = certainly mempty
-binomial n p = Dist [(f (toInteger k), nChoose k * p^k * (1 - p)^(n-k)) | k <- [0..n]]
+binomial n p =
+  if n <= 0 then certainly mempty
+            else Dist [(f (toInteger k), nChoose k * p^k * (1 - p)^(n-k)) | k <- [0..n]]
   where nChoose k = P (f (n `choose` k))
         f         = toNumeric . fromIntegral
 
 -- Choose an element from a list, removing it
 selectOne :: (Eq a, Monoid a) => [a] -> Dist (a,[a])
-selectOne [] = certainly (mempty,[])
-selectOne as = uniform [(a, delete a as) | a <- as]
+selectOne as = if null as then certainly (mempty,[])
+                          else uniform [(a, delete a as) | a <- as]
 
 -- Example: selectOne [1,2,3]
 -- Note that there is nothing random about these functions: they are
@@ -185,9 +188,9 @@ instance Monad Dist where
 
 -- ... and now we can select more than once without replacement:
 selectMany :: (Eq a, Monoid a) => Int -> [a] -> Dist ([a],[a])
-selectMany n as | n <= 0  = certainly ([],as)
-selectMany n as | null as = certainly ([],[])
-selectMany n as@(a:_) = do
+selectMany n as =
+  if n <= 0 || null as then certainly ([],as)
+  else do
     (a,rs)  <- selectOne as
     (bs,ss) <- selectMany (n-1) rs
     return (a:bs,ss)
@@ -218,9 +221,10 @@ cdf d = [(a,unProb p) | (a,p) <- zip (values d) totalProbs]
 
 -- Sample by inverting the cumulative distribution
 sample :: Monoid a => Dist a -> Probability -> a
-sample d p | p <= 0 = headDef (values d)
-           | p >= 1 = headDef (reverse (values d))
-           | otherwise = headDef (drop (sampleLength d) (values d))
+sample d p =
+  if      p <= 0 then headDef (values d)
+  else if p >= 1 then headDef (reverse (values d))
+  else                headDef (drop (sampleLength d) (values d))
   where sampleLength  = length . takeWhile (\n -> p >= P n) . map snd . cdf
         headDef []    = mempty
         headDef (a:_) = a
@@ -281,7 +285,7 @@ class Sim f where
 -- Pure distributions can be simulated as long as the point type is totally ordered
 instance Sim Dist where
   sequ = let op f g = simplify . (f >=> g)
-         in foldr op pure
+         in foldl' op pure
 
 -- Randomized distributions can also be simulated
 instance Sim RDist where
@@ -333,20 +337,20 @@ runRDist = unRand . unRDist
 
 -- We can build a randomized distribution from any list of random samples
 rDist :: Monoid a => [Rand a] -> RDist a
-rDist []  = RDist (return mempty)
-rDist ras = RDist (fmap uniform (sequenceA ras))
+rDist ras = RDist (if null ras then return mempty else fmap uniform (sequenceA ras))
 
 -- Lift any pure distribution to a randomized distribution using n samples
 rSampleDist :: Monoid a => Int -> Dist a -> RDist a
-rSampleDist n d | n <= 0 = RDist (pure d)
-                | otherwise = rDist (replicate n (rSample d))
+rSampleDist n d = rDist (if n <= 0 then [] else replicate n (rSample d))
 
 -- Lift any pure state transition to a randomized state
 -- transition using n samples
 rSampleTrans :: Monoid a => Int -> (a -> Dist a) -> (a -> RDist a)
 rSampleTrans n f = rSampleDist n . f
 
--- Helper for moving IO actions outside distribution
+-- Helper for moving Rand side-effects outside distribution. This isn't great
+-- because semantically the points of the distribution aren't really ordered,
+-- but we don't care about the ordering since we just wanted the randomness.
 seqDist :: Dist (Rand a) -> Rand (Dist a)
 seqDist dras = Dist <$> sequenceA [fmap (\a -> (a,p)) ra | (ra,p) <- masses dras]
 
@@ -394,22 +398,25 @@ type Height = Numeric
 
 -- Trees are either alive, hit by lightning (standing), or fallen
 data Tree = Alive !Height | Hit !Height | Fallen deriving (Eq,Ord,Show)
+
+-- Get the Height of a Tree if it's Alive
+alive :: Tree -> Maybe Height
+alive (Alive h) = Just h
+alive _         = Nothing
+
 instance Monoid Tree where
-  x `mappend` y = x
-  mempty        = Fallen
+  mappend = const (const mempty)
+  mempty  = Fallen
 
 -- Simulate a year's growth for any Tree that is Alive
 grow :: Tree -> Dist Tree
-grow t = case t of
-           Alive h -> fmap (Alive . (+h)) baseDist
-           x -> certainly x
-  where baseDist = fmap (+1) (binomial 4 (prob (1 % 2)))
+grow t = maybe (certainly t)
+               (\h -> Alive . (+h) <$> baseDist) (alive t)
+  where baseDist = (+1) <$> binomial 4 (prob (1 % 2))
 
 -- Simulate a Tree being hit by lightning, retaining its height
 hit :: Tree -> Dist Tree
-hit t = case t of
-          Alive h -> certainly (Hit h)
-          x -> certainly x
+hit t = maybe (certainly t) (certainly . Hit) (alive t)
 
 -- Simulate a Tree falling, losing its height
 fall :: Tree -> Dist Tree
