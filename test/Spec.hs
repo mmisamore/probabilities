@@ -165,6 +165,13 @@ instance (Arbitrary a, Monoid a, Ord a) => Arbitrary (RDist a) where
      d <- arbitrary
      return (pureDist d)
 
+-- Random probabilities are probabilities
+randProbIsProb :: Property
+randProbIsProb = ioProperty . unRand $ do
+  p <- randomProb
+  return (p >= prob 0 && p <= prob 1)
+
+
 main :: IO ()
 main = do
   quickCheck probabilityInUnitInterval
@@ -196,4 +203,5 @@ main = do
   quickCheck cdfValuesMatchDist
   quickCheck cdfLastNumIsOne
   quickCheck sampleCertainly
+  quickCheck randProbIsProb
 
